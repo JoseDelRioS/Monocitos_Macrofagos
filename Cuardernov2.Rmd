@@ -1,0 +1,617 @@
+------------------------------------------------------------------------
+
+---
+title: "Prueba"
+output: html_notebook
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = TRUE)
+```
+
+## 1. Introducción
+
+## 2.Carga de librerías.
+
+A continuación, se muestran las librerías que se utilizarán a lo largo del cuaderno. En caso de no disponer de alguna de ellas, ejecute el comando install.packages("").
+
+```{r}
+library(readr)
+library(GenomicRanges)
+library(dplyr)
+library(tidyr)
+library(data.table)
+library(ggplot2)
+library(cowplot)
+library(RColorBrewer)
+library(grid)
+library(forcats)
+library(DESeq2)
+library(biomaRt)
+```
+
+------------------------------------------------------------------------
+
+## 3.Carga de datos.
+
+En esta sección, cargamos los datos de la expresión para distintas muestras obtenidos con RNAseq crudos y procesados utilizando TPM. Además, añadimos un archivo de metadatos donde se registra información de cada una de las muestras.
+
+```{r}
+message("Cargando datos...")
+exp_tpm <- fread("~/RScripts/genes_tpm_monomacro_processed.csv.gz")
+meta_datos <- fread("~/RScripts/metadata_monomacro_filtered.csv.gz")
+exp_raw <- fread("~/RScripts/genes_expected_count_DESeq2.csv.gz")
+```
+
+------------------------------------------------------------------------
+
+## 4.Filtrado de datos y matriz de expresión.
+
+Vamos a realizar un filtrado de los datos de las TPM para calcular la PCA y ver que muestras nos interesan. En este ejemplo, nos vamos a centrar en los macrófagos
+
+```{r}
+macrophage_meta <- meta_datos %>%
+  filter(harmonized_sample_label == "Macrophage") %>%
+  mutate(across(where(is.character), as.factor))
+
+message("Preparando matriz de expresión...")
+common_samples <- intersect(macrophage_meta$EpiRR, colnames(exp_tpm))
+
+expr_matrix_raw <- exp_tpm %>%
+  dplyr::select(id_col, all_of(common_samples))
+
+macrophage_meta_filtered <- macrophage_meta %>%
+  filter(EpiRR %in% common_samples) %>%
+  arrange(match(EpiRR, common_samples))
+
+expr_matrix <- as.data.frame(expr_matrix_raw)
+rownames(expr_matrix) <- expr_matrix$id_col
+expr_matrix <- expr_matrix[, -1]
+expr_matrix <- as.matrix(expr_matrix)
+
+expr_t <- t(expr_matrix)
+
+if (!all(rownames(expr_t) == macrophage_meta_filtered$EpiRR)) {
+  stop("El orden de las muestras en la matriz de expresión y los metadatos no coincide. ¡Deteniendo!")
+} else {
+  message("Las muestras en la matriz de expresión y los metadatos están correctamente alineadas.")
+}
+
+```
+
+## 5.Cálculo de PCA
+
+```{r}
+message("Realizando cálculo de PCA...")
+pca_res <- prcomp(expr_t, center = TRUE, scale. = FALSE)
+var_exp <- (pca_res$sdev^2) / sum(pca_res$sdev^2)
+
+pca_df_base <- data.frame(
+  sample = rownames(pca_res$x),
+  PC1 = pca_res$x[,1],
+  PC2 = pca_res$x[,2])
+```
+
+## 6.Representación de la PCA para cada metadato
+
+```{r}
+generate_pca_plot_core <- function(pca_data_frame, metadata_df, color_column,
+                                   title_prefix = "",
+                                   point_size = 3, label_points = FALSE,
+                                   colors_palette = NULL,
+                                   show_legend_for_extraction = FALSE) {
+  
+  pca_df_final <- pca_data_frame %>%
+    dplyr::left_join(metadata_df %>% dplyr::select(EpiRR, !!sym(color_column)),
+                     by = c("sample" = "EpiRR")) %>%
+    dplyr::mutate(color_group = .data[[color_column]])
+  
+  pc1_var_exp <- round(100 * var_exp[1], 1)
+  pc2_var_exp <- round(100 * var_exp[2], 1)
+  
+  p <- ggplot(pca_df_final, aes(x = PC1, y = PC2, color = color_group)) +
+    geom_point(size = point_size) +
+    labs(
+      title = paste0(title_prefix, "PCA por ", gsub("_", " ", color_column)),
+      x = paste0("PC1 (", pc1_var_exp, "%)"),
+      y = paste0("PC2 (", pc2_var_exp, "%)"),
+      color = gsub("_", " ", color_column)
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(hjust = 0.5, face = "bold"),
+      legend.position = if (show_legend_for_extraction) "bottom" else "none",
+      legend.justification = "center",
+      legend.text = element_text(size = 6),
+      legend.title = element_text(size = 7, face = "bold")
+    )
+  
+  if (label_points) {
+    p <- p + geom_text(aes(label = sample), size = 2.5, vjust = -1, show.legend = FALSE)
+  }
+  
+  if (!is.null(colors_palette)) {
+    p <- p + scale_color_manual(values = colors_palette)
+  }
+  
+  return(p)
+}
+
+# --- 6. Seleccionar columnas del metadata para colorear ---
+message("Identificando columnas adecuadas para colorear los plots...")
+excluded_cols_manual <- c("EpiRR", "harmonized_sample_label", "id_col")
+
+columns_to_plot_by <- monocyte_meta_filtered %>%
+  dplyr::select(-any_of(excluded_cols_manual)) %>%
+  colnames()
+
+if (length(columns_to_plot_by) == 0) {
+  warning("No se encontraron columnas categóricas adecuadas en los metadatos para generar plots.")
+} else {
+  message(paste(
+    "Se generarán plots para las siguientes columnas:",
+    paste(columns_to_plot_by, collapse = ", ")
+  ))
+}
+
+# --- 7. Crear los plots y mostrarlos en el cuaderno ---
+composed_plots_list <- list()
+
+if (length(columns_to_plot_by) > 0) {
+  
+  message("Mostrando plots directamente en el cuaderno...")
+  
+  for (col_name in columns_to_plot_by) {
+    message(paste("Procesando columna:", col_name))
+    
+    monocyte_meta_filtered[[col_name]] <- as.factor(monocyte_meta_filtered[[col_name]])
+    num_levels <- nlevels(monocyte_meta_filtered[[col_name]])
+    
+    # Paletas automáticas según número de categorías
+    if (num_levels <= 8) {
+      current_colors <- RColorBrewer::brewer.pal(max(3, num_levels), "Dark2")[1:num_levels]
+    } else if (num_levels <= 12) {
+      current_colors <- RColorBrewer::brewer.pal(max(3, num_levels), "Paired")[1:num_levels]
+    } else {
+      current_colors <- grDevices::colorRampPalette(
+        RColorBrewer::brewer.pal(9, "Set1")
+      )(num_levels)
+    }
+    
+    # Plot para extraer leyenda
+    plot_for_legend <- generate_pca_plot_core(
+      pca_data_frame = pca_df_base,
+      metadata_df = monocyte_meta_filtered,
+      color_column = col_name,
+      point_size = 2.5,
+      colors_palette = current_colors,
+      show_legend_for_extraction = TRUE
+    )
+    
+    legend_plot <- get_legend(plot_for_legend)
+    
+    # Plot principal
+    main_plot <- generate_pca_plot_core(
+      pca_data_frame = pca_df_base,
+      metadata_df = monocyte_meta_filtered,
+      color_column = col_name,
+      point_size = 2.5,
+      colors_palette = current_colors,
+      show_legend_for_extraction = FALSE
+    )
+    
+    # Composición final
+    composed_plot <- plot_grid(
+      main_plot, legend_plot,
+      ncol = 1,
+      rel_heights = c(0.8, 0.2),
+      align = "v"
+    )
+    
+    composed_plots_list[[col_name]] <- composed_plot
+    
+    print(composed_plot)
+  }
+  
+  message("✅ Proceso completado. Gráficos generados en el cuaderno.")
+  
+} else {
+  message("⚠️ No se generaron plots por falta de columnas válidas.")
+}
+  
+```
+
+## 7.Filtrado de datos
+
+Después de observar las PCAs, selecionamos el grupo de datos que nos interesa. En nuestro caso, hemos selecionado los donantes que comienzan por "S0".
+
+```{r}
+meta_S0 <- meta_datos %>%
+  filter(harmonized_donor_id %in% c(
+    "S00BS4", "S00C1H", "S00BHQ", "S00FTN", "S001S7", "S0022I",
+    "S0018A", "S00DVR", "S007SK", "S00E8W", "S00390", "S006VI",
+    "S001MJ", "S00H6O", "S00622", "S00J8C"
+  )) %>%
+  mutate(across(where(is.character), as.factor))
+```
+
+------------------------------------------------------------------------
+
+## 8. Preparación de los datos.
+
+Vamos realizar un análisis diferencial de los datos de RNAseq crudos usando DESeq2
+
+```{r}
+limpiar_nombres <- function(nombres) {
+  nombres_acortados <- gsub("^([^.]*\\.[^.]*)\\..*", "\\1", nombres)
+  nombres_unicos <- make.unique(nombres_acortados, sep = "_")
+  return(nombres_unicos)
+}
+
+conteos_DESeq2 <- exp_raw %>%
+  rename_with(limpiar_nombres) 
+
+
+common_samples <- intersect(meta_S0$EpiRR, colnames(conteos_DESeq2))
+
+meta_S0_filtered <- meta_S0 %>%
+  filter(EpiRR %in% common_samples) %>%
+  arrange(match(EpiRR, common_samples))
+
+
+datos_meta_DESeq2 <- meta_S0_filtered %>%
+  dplyr::select(EpiRR, harmonized_cell_type, harmonized_tissue_type, harmonized_donor_sex) %>%
+  mutate(across(where(is.character), as.factor))
+```
+
+------------------------------------------------------------------------
+
+## 9.Alineación de muestras y creación de matrices.
+
+```{r}
+
+
+meta_final <- datos_meta_DESeq2 %>%
+  filter(EpiRR %in% common_samples) %>%
+  arrange(match(EpiRR, common_samples))
+
+conteos_final <- conteos_DESeq2 %>%
+  dplyr::select(id_col, all_of(common_samples))
+
+colData_final <- as.data.frame(meta_final)
+rownames(colData_final) <- colData_final$EpiRR
+
+countData_final <- as.data.frame(conteos_final)
+rownames(countData_final) <- countData_final$id_col
+countData_final$id_col <- NULL
+countData_final <- round(as.matrix(countData_final))
+
+stopifnot(all(colnames(countData_final) == rownames(colData_final)))
+message("Datos alineados correctamente para DESeq2.")
+```
+
+------------------------------------------------------------------------
+
+## 10. Análisis de expresión diferencial.
+
+Creación del objeto dds y realización del análisis de expresión usando DESeq2.
+
+```{r}
+dds <- DESeqDataSetFromMatrix(
+  countData = countData_final,
+  colData = colData_final,
+  design = ~ harmonized_donor_sex + harmonized_cell_type + harmonized_tissue_type
+)
+
+dds <- DESeq(dds)
+message("Análisis DESeq2 completado.")
+```
+
+------------------------------------------------------------------------
+
+## 11. Resultados DESeq2
+
+Comparaciones M2vsM0 y M1vsM0
+
+```{r}
+m2vsmo <- results(dds, contrast = c("harmonized_cell_type", "alternatively activated macrophage", "macrophage"))
+m1vsmo <- results(dds, contrast = c("harmonized_cell_type", "inflammatory macrophage", "macrophage"))
+```
+
+------------------------------------------------------------------------
+
+------------------------------------------------------------------------
+
+## 12. Diagrama de Venn.
+
+Representación de los resultados en un diagrama de Venn
+
+```{r}
+if (!requireNamespace("ggVennDiagram", quietly = TRUE)) install.packages("ggVennDiagram")
+library(ggVennDiagram)
+
+genes_m2 <- rownames(subset(m2vsmo, padj < 0.05 & !is.na(padj)))
+genes_m1 <- rownames(subset(m1vsmo, padj < 0.05 & !is.na(padj)))
+
+venn_plot <- ggVennDiagram(list(M2vsM0 = genes_m2, M1vsM0 = genes_m1)) +
+  scale_fill_gradient(low = "#F4FAFE", high = "#4981BF") +
+  labs(title = "Comparación entre tipos de macrófagos vs M0")
+
+print(venn_plot)
+```
+
+------------------------------------------------------------------------
+
+## 13. Cálculo de PCA.
+
+Volvemos a obtener las PCA, en este caso usando DeSeq2, para comparar los resultados con las TPM.
+
+```{r}
+vsd <- vst(dds, blind = FALSE)
+variables_a_graficar <- c("harmonized_cell_type", "harmonized_tissue_type", "harmonized_donor_sex")
+
+for (variable_actual in variables_a_graficar) {
+  pcaData <- plotPCA(vsd, intgroup = variable_actual, returnData = TRUE)
+  percentVar <- round(100 * attr(pcaData, "percentVar"))
+
+  p <- ggplot(pcaData, aes(x = PC1, y = PC2, color = .data[[variable_actual]])) +
+    geom_point(size = 4) +
+    labs(
+      title = "Análisis de Componentes Principales (PCA)",
+      subtitle = paste("Muestras coloreadas por:", gsub("_", " ", variable_actual)),
+      x = paste0("PC1: ", percentVar[1], "%"),
+      y = paste0("PC2: ", percentVar[2], "%"),
+      color = gsub("_", " ", variable_actual)
+    ) +
+    theme_bw(base_size = 14) +
+    coord_fixed()
+
+  print(p)  # Asegura que se imprima en el cuaderno
+}
+
+message("Archivo PDF con PCA generado en 'PCA_Plots/'.")
+```
+
+------------------------------------------------------------------------
+
+## 14. Filtrado M0.
+
+A continuación, vamos a obtener la red para M0 usando Esearch3D
+
+```{r}
+m0<- meta_S0 %>%
+  filter(harmonized_cell_type == "macrophage")
+
+colsmon <- c("id_col",intersect(m0$EpiRR, colnames(exp_tpm)))
+monact <- exp_tpm[, ..colsmon]
+
+
+leeract <- monact %>%
+  dplyr::rowwise() %>%
+  dplyr::mutate(mean_other_cols = mean(c_across(!id_col), na.rm = TRUE)) %>%
+  dplyr::ungroup() %>%
+  dplyr::select(id_col, mean_other_cols)
+
+
+
+names(leeract)[2] <- "expresion"
+leeract$id_col<-sub("\\..*$", "", leeract$id_col)
+
+```
+
+------------------------------------------------------------------------
+
+## 15. Carga de datos para Esearch3D.
+
+Para la representación de la red, necesitamos la interacciones PCHiC para M0 y los genes del genoma 37.
+
+```{r}
+leerint<- read_tsv("~/RScripts/PCHiC_peak_matrix_cutoff5.tsv")
+nombres<-read_csv("~/RScripts/human_genes_grch37_p13.csv")
+
+intMon<-leerint[leerint$Mac0>5, ]
+
+```
+
+------------------------------------------------------------------------
+
+## 16. Generamos las matrices y data frames para ejecutar Esearch3D.
+
+Obtenemos gf_nb, nBff, inputnB y ann_net_nb en el formato adecuado.
+
+```{r}
+ensembl <- useEnsembl(biomart = "genes", dataset = "hsapiens_gene_ensembl")
+
+ensembl_ids <- leeract$id_col
+
+gene_map <- getBM(
+  attributes = c("ensembl_gene_id", "hgnc_symbol"),
+  filters = "ensembl_gene_id",
+  values = ensembl_ids,
+  mart = ensembl
+)
+
+gene_map <- gene_map %>%
+  left_join(leeract %>% dplyr::select(id_col, expresion), 
+            by = c("ensembl_gene_id" = "id_col"))
+
+inputnB <- gene_map %>%
+  dplyr::select(expresion,ensembl_gene_id,hgnc_symbol) %>%
+  mutate(
+    hgnc_symbol = ifelse(is.na(hgnc_symbol) | hgnc_symbol == "",
+                         ensembl_gene_id,
+                         hgnc_symbol)
+  ) %>%
+  dplyr::select(hgnc_symbol,expresion) %>%
+  distinct(hgnc_symbol, .keep_all = TRUE)   # elimina duplicados de hgnc_symbol
+
+gestion <- c(inputnB$hgnc_symbol)    # Pone la primera columna como nombres de fila
+inputnB <- inputnB[ , 2, drop = FALSE]      # Deja solo la segunda columna
+colnames(inputnB) <- "profile"
+rownames(inputnB)<-gestion
+
+
+genes <- nombres
+frags <- intMon
+# Filtrar fragmentos válidos
+frags <- frags[!is.na(frags$oeChr) & !is.na(frags$oeStart) & !is.na(frags$oeEnd), ]
+gr_genes <- GRanges(
+  seqnames = genes$chromosome_name,
+  ranges = IRanges(start = genes$start_position, end = genes$end_position),
+  gene_id = genes$ensembl_gene_id,
+  hgnc_symbol = genes$hgnc_symbol
+)
+
+
+matched_bait <- frags %>%
+  dplyr::select(fragment_id = baitID, hgnc_symbol = baitName) %>%
+  separate_rows(hgnc_symbol, sep = ";") %>%
+  mutate(hgnc_symbol = trimws(hgnc_symbol)) %>%
+  mutate(fragment_type = "bait")
+
+
+# Asociación oeID, excluyendo fragmentos ya usados como bait
+gr_oe <- GRanges(
+  seqnames = frags$oeChr,
+  ranges = IRanges(start = frags$oeStart, end = frags$oeEnd),
+  fragment_id = frags$oeID
+)
+
+hits_oe <- findOverlaps(gr_oe, gr_genes)
+
+matched_oe <- data.frame(
+  fragment_id = mcols(gr_oe)$fragment_id[queryHits(hits_oe)],
+  ensembl_gene_id = mcols(gr_genes)$gene_id[subjectHits(hits_oe)],
+  hgnc_symbol = mcols(gr_genes)$hgnc_symbol[subjectHits(hits_oe)],
+  fragment_type = "oe"
+)
+
+# Procesar matched_bait
+matched_bait_clean <- matched_bait %>%
+  mutate(
+    fragment_id = paste0("frag", fragment_id)
+  ) %>%
+  dplyr::select(fragment_id, hgnc_symbol)
+
+# Procesar matched_oe
+matched_oe_clean <- matched_oe %>%
+  mutate(
+    fragment_id = paste0("frag", fragment_id),
+    hgnc_symbol = ifelse(is.na(hgnc_symbol) | hgnc_symbol == "",
+                         ensembl_gene_id,
+                         hgnc_symbol)
+  ) %>%
+  dplyr::select(fragment_id, hgnc_symbol)
+
+# Combinar después de limpiar
+gf_nb <- bind_rows(matched_bait_clean, matched_oe_clean)
+
+colnames(gf_nb) <- c("V1", "V2")
+gf_nb <- gf_nb %>% filter(!is.na(V1) & !is.na(V2))
+
+nBff<-data.frame(intMon$baitID,intMon$oeID)
+
+nBff[] <- lapply(nBff, function(x) paste0("frag", x))
+colnames(nBff) <- c("V1", "V2")
+
+
+# Supone que ya tienes los data frames leerint y nombres cargados en tu entorno
+
+#  Selecciona las columnas de interés de leerint y nombres
+leerint_bait <- intMon[, c("baitChr", "baitID", "baitStart", "baitEnd")]
+leerint_oe   <- intMon[, c("oeChr", "oeID", "oeStart", "oeEnd")]
+nombres_sel  <- nombres[, c("ensembl_gene_id", "hgnc_symbol", "start_position", "end_position", "chromosome_name")]
+
+#  Construye los data frames individuales con nombres estandarizados
+# Del bait
+df_bait <- data.frame(
+  ID   = paste0("frag", leerint_bait$baitID),
+  chr  = paste0("chr", leerint_bait$baitChr),
+  start = leerint_bait$baitStart,
+  end   = leerint_bait$baitEnd,
+  stringsAsFactors = FALSE
+)
+
+# Del oe
+df_oe <- data.frame(
+  ID   = paste0("frag", leerint_oe$oeID),
+  chr  = paste0("chr", leerint_oe$oeChr),
+  start = leerint_oe$oeStart,
+  end   = leerint_oe$oeEnd,
+  stringsAsFactors = FALSE
+)
+
+# De los genes
+# Si hgnc_symbol está vacío, usa ensembl_gene_id
+gene_id <- ifelse(
+  is.na(nombres_sel$hgnc_symbol) | nombres_sel$hgnc_symbol == "",
+  nombres_sel$ensembl_gene_id,
+  nombres_sel$hgnc_symbol
+)
+
+df_genes <- data.frame(
+  ID   = gene_id,
+  chr  = paste0("chr", nombres_sel$chromosome_name),
+  start = nombres_sel$start_position,
+  end   = nombres_sel$end_position,
+  stringsAsFactors = FALSE
+)
+
+# Une todo en un solo data frame
+df_final <- rbind(df_bait, df_oe, df_genes)
+
+# elimina filas duplicadas
+ann_net_nb <- unique(df_final)
+```
+
+------------------------------------------------------------------------
+
+## 17. Generación de redes Esearch3D.
+
+```{r}
+library(Esearch3D)
+
+
+#1) A two column dataframe representing the gene - fragment interaction network
+gf_net = as.matrix(gf_nb)
+#2) A two column dataframe representing the fragment-fragment interaction network
+ff_net = as.matrix(nBff)
+
+#3) A matrix containing the starting values of the nodes (gene node scores are given by the RNA-seq values while fragments have a starting value of 0)
+input_m = as.matrix(inputnB)
+#4) A list of genes to annotate to the chromatin fragments
+ann_net_b= ann_net_nb
+
+#Two step propagation -----
+#Propagation over the gene-fragment network
+gf_prop = rwr_OVprop(g=gf_net,
+                     input_m = input_m, 
+                     no_cores = 5, 
+                     r = 0.8)
+#Propagation over the gene-fragment-fragment network
+ff_prop=rwr_OVprop(g=ff_net,
+                   input_m = gf_prop, 
+                   no_cores = 5, 
+                   r = 0.8)
+
+#Create an annotated igraph object
+net=create_net2plot(gf_net,
+                    input_m,
+                    gf_prop,
+                    ann_net_b,
+                    frag_pattern = "frag",
+                    ff_net,
+                    ff_prop)
+
+```
+
+------------------------------------------------------------------------
+
+## 19. Ejecución de la interfaz.
+
+```{r}
+#Start the GUI
+start_GUI(net, ann_net_b)
+```
+
+------------------------------------------------------------------------
