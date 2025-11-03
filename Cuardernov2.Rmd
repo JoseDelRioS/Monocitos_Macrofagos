@@ -311,13 +311,20 @@ message("Análisis DESeq2 completado.")
 
 ## 11. Resultados DESeq2
 
-Comparaciones M2vsM0 y M1vsM0
+Comparaciones M2vsM0, M1vsM0 y cuentas normalizadas
 
 ```{r}
 m2vsmo <- results(dds, contrast = c("harmonized_cell_type", "alternatively activated macrophage", "macrophage"))
 m1vsmo <- results(dds, contrast = c("harmonized_cell_type", "inflammatory macrophage", "macrophage"))
 
 norm_counts <- counts(dds, normalized = TRUE)
+
+counts_df <- as.data.frame(norm_counts)
+counts_df$id_col <- rownames(norm_counts)
+counts_df <- counts_df[, c("id_col", setdiff(names(counts_df), "id_col"))]
+rownames(counts_df) <- NULL
+
+
 ```
 
 ------------------------------------------------------------------------
@@ -381,11 +388,14 @@ message("Archivo PDF con PCA generado en 'PCA_Plots/'.")
 A continuación, vamos a obtener la red para M0 usando Esearch3D. Usaremos el número de cuentas normalizado que obtenemos del DESeq2
 
 ```{r}
+
+
+
 m0<- meta_S0 %>%
   filter(harmonized_cell_type == "macrophage")
 
-colsmon <- c("id_col",intersect(m0$EpiRR, colnames(norm_counts)))
-monact <- norm_counts[, ..colsmon]
+colsmon <- c("id_col",intersect(m0$EpiRR, colnames(counts_df)))
+monact <- counts_df[, colsmon]
 
 
 leeract <- monact %>%
