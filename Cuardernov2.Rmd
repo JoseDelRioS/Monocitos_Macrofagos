@@ -38,9 +38,9 @@ En esta sección, cargamos los datos de la expresión para distintas muestras ob
 
 ```{r}
 message("Cargando datos...")
-exp_tpm <- fread("~/RScripts/genes_tpm_monomacro_processed.csv.gz")
-meta_datos <- fread("~/RScripts/metadata_monomacro_filtered.csv.gz")
-exp_raw <- fread("~/RScripts/genes_expected_count_DESeq2.csv.gz")
+exp_tpm <- fread("~/Monocitos_Macrofagos/Data/genes_tpm_monomacro_processed.csv.gz")
+meta_datos <- fread("~/Monocitos_Macrofagos/Data/metadata_monomacro_filtered.csv.gz")
+exp_raw <- fread("~/Monocitos_Macrofagos/Data/genes_expected_count_DESeq2.csv.gz")
 ```
 
 ------------------------------------------------------------------------
@@ -141,7 +141,7 @@ generate_pca_plot_core <- function(pca_data_frame, metadata_df, color_column,
 message("Identificando columnas adecuadas para colorear los plots...")
 excluded_cols_manual <- c("EpiRR", "harmonized_sample_label", "id_col")
 
-columns_to_plot_by <- monocyte_meta_filtered %>%
+columns_to_plot_by <- macrophage_meta_filtered %>%
   dplyr::select(-any_of(excluded_cols_manual)) %>%
   colnames()
 
@@ -164,8 +164,8 @@ if (length(columns_to_plot_by) > 0) {
   for (col_name in columns_to_plot_by) {
     message(paste("Procesando columna:", col_name))
     
-    monocyte_meta_filtered[[col_name]] <- as.factor(monocyte_meta_filtered[[col_name]])
-    num_levels <- nlevels(monocyte_meta_filtered[[col_name]])
+    macrophage_meta_filtered[[col_name]] <- as.factor(macrophage_meta_filtered[[col_name]])
+    num_levels <- nlevels(macrophage_meta_filtered[[col_name]])
     
     # Paletas automáticas según número de categorías
     if (num_levels <= 8) {
@@ -181,7 +181,7 @@ if (length(columns_to_plot_by) > 0) {
     # Plot para extraer leyenda
     plot_for_legend <- generate_pca_plot_core(
       pca_data_frame = pca_df_base,
-      metadata_df = monocyte_meta_filtered,
+      metadata_df = macrophage_meta_filtered,
       color_column = col_name,
       point_size = 2.5,
       colors_palette = current_colors,
@@ -193,7 +193,7 @@ if (length(columns_to_plot_by) > 0) {
     # Plot principal
     main_plot <- generate_pca_plot_core(
       pca_data_frame = pca_df_base,
-      metadata_df = monocyte_meta_filtered,
+      metadata_df = macrophage_meta_filtered,
       color_column = col_name,
       point_size = 2.5,
       colors_palette = current_colors,
@@ -316,6 +316,8 @@ Comparaciones M2vsM0 y M1vsM0
 ```{r}
 m2vsmo <- results(dds, contrast = c("harmonized_cell_type", "alternatively activated macrophage", "macrophage"))
 m1vsmo <- results(dds, contrast = c("harmonized_cell_type", "inflammatory macrophage", "macrophage"))
+
+norm_counts <- counts(dds, normalized = TRUE)
 ```
 
 ------------------------------------------------------------------------
@@ -376,14 +378,14 @@ message("Archivo PDF con PCA generado en 'PCA_Plots/'.")
 
 ## 14. Filtrado M0.
 
-A continuación, vamos a obtener la red para M0 usando Esearch3D
+A continuación, vamos a obtener la red para M0 usando Esearch3D. Usaremos el número de cuentas normalizado que obtenemos del DESeq2
 
 ```{r}
 m0<- meta_S0 %>%
   filter(harmonized_cell_type == "macrophage")
 
-colsmon <- c("id_col",intersect(m0$EpiRR, colnames(exp_tpm)))
-monact <- exp_tpm[, ..colsmon]
+colsmon <- c("id_col",intersect(m0$EpiRR, colnames(norm_counts)))
+monact <- norm_counts[, ..colsmon]
 
 
 leeract <- monact %>%
@@ -406,8 +408,8 @@ leeract$id_col<-sub("\\..*$", "", leeract$id_col)
 Para la representación de la red, necesitamos la interacciones PCHiC para M0 y los genes del genoma 37.
 
 ```{r}
-leerint<- read_tsv("~/RScripts/PCHiC_peak_matrix_cutoff5.tsv")
-nombres<-read_csv("~/RScripts/human_genes_grch37_p13.csv")
+leerint<- read_tsv("~/Monocitos_Macrofagos/Data/PCHiC_peak_matrix_cutoff5.tsv")
+nombres<-read_csv("~/Monocitos_Macrofagos/Data/human_genes_grch37_p13.csv")
 
 intMon<-leerint[leerint$Mac0>5, ]
 

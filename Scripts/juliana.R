@@ -4,7 +4,7 @@ library(dplyr)
 library(tidyr)
 library(data.table)
 
-leeract_raw<-fread("~/RScripts/genes_tpm_monomacro_processed.csv.gz")
+leeract_raw<-read_csv("~/Monocitos_Macrofagos/Data/expected_counts_deseq2.csv")
 ayudaact<-fread("~/RScripts/metadata_monomacro_filtered.csv.gz")
 
 

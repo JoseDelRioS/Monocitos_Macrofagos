@@ -12,9 +12,9 @@ library(DESeq2)
 
 # --- 1. Carga de datos ---
 message("Cargando datos...")
-leeract_raw <- fread("~/RScripts/genes_tpm_monomacro_processed.csv.gz")
-ayudaact <- fread("~/RScripts/metadata_monomacro_filtered.csv.gz")
-DESeq2_data <- fread("~/RScripts/genes_expected_count_DESeq2.csv.gz")
+leeract_raw <- fread("~/Monocitos_Macrofagos/Data/genes_tpm_monomacro_processed.csv.gz")
+ayudaact <- fread("~/Monocitos_Macrofagos/Data/metadata_monomacro_filtered.csv.gz")
+DESeq2_data <- fread("~/Monocitos_Macrofagos/Data/genes_expected_count_DESeq2.csv.gz")
 
 monocyte_meta <- ayudaact %>%
   filter(harmonized_donor_id %in% c(
@@ -163,54 +163,61 @@ lista_genes_venn <- list(
   "M1vsM0 (padj > 0.05)" = genes_lista_m1
 )
 
-# Generar el diagrama de Venn
-venn_plot <- ggVennDiagram(
-  lista_genes_venn,
-  set_size = 2.5,
-  label_alpha = 0, # Elimina el fondo de los números
-  category.names = c("M2vsM0", "M1vsM0") # Nombres más cortos para las categorías
-) +
-  scale_fill_gradient(low = "#F4FAFE", high = "#4981BF") + # Esquema de color
-  labs(title = "Comparación entre tipos de macrófagos vs macrófagos base",
-       subtitle = "padj > 0.05")
+# Obtener expected counts (normalizados)
+norm_counts <- counts(dds, normalized = TRUE)
 
-# Mostrar el gráfico
-print(venn_plot)
-
-message("Diagrama de Venn generado exitosamente.")
+# Guardar en archivo CSV
+write.csv(norm_counts, file = "~/Monocitos_Macrofagos/Data/expected_counts_deseq2.csv", quote = FALSE)
 
 
-vsd <- vst(dds, blind = FALSE)
-variables_a_graficar <- c("harmonized_cell_type", "harmonized_tissue_type", "harmonized_donor_sex")
-
-pdf(file.path("PCA_Plots", "PCAnuevos.pdf"), width = 11, height = 8.5) # Dimensiones para una página apaisada estándar
-
-
-for (variable_actual in variables_a_graficar) {
-
-  message(paste("Generando PCA para la variable:", variable_actual))
-  pcaData <- plotPCA(vsd, intgroup = variable_actual, returnData = TRUE)
-  percentVar <- round(100 * attr(pcaData, "percentVar"))
-
-  pca_plot <- ggplot(pcaData, aes(x = PC1, y = PC2, color = .data[[variable_actual]])) +
-    geom_point(size = 4) +
-    labs(
-      title = "Análisis de Componentes Principales (PCA)",
-      subtitle = paste("Muestras coloreadas por:", gsub("_", " ", variable_actual)), # Subtítulo dinámico y legible
-      x = paste0("PC1: ", percentVar[1], "% de varianza"),
-      y = paste0("PC2: ", percentVar[2], "% de varianza"),
-      color = gsub("_", " ", variable_actual) # Título de la leyenda dinámico
-    ) +
-    theme_bw(base_size = 14) + # Aumentar el tamaño base de la fuente
-    coord_fixed()
-
-  # Imprimir el gráfico. Esto es crucial para que se dibuje en el archivo PDF.
-  print(pca_plot)
-
-} # Fin del bucle
-
-# 4. Cerrar el dispositivo PDF. Esto guarda el archivo en tu directorio de trabajo.
-dev.off()
-
-message("Archivo 'PCAsinPC.pdf' creado exitosamente con todos los gráficos.")
+# # Generar el diagrama de Venn
+# venn_plot <- ggVennDiagram(
+#   lista_genes_venn,
+#   set_size = 2.5,
+#   label_alpha = 0, # Elimina el fondo de los números
+#   category.names = c("M2vsM0", "M1vsM0") # Nombres más cortos para las categorías
+# ) +
+#   scale_fill_gradient(low = "#F4FAFE", high = "#4981BF") + # Esquema de color
+#   labs(title = "Comparación entre tipos de macrófagos vs macrófagos base",
+#        subtitle = "padj > 0.05")
+# 
+# # Mostrar el gráfico
+# print(venn_plot)
+# 
+# message("Diagrama de Venn generado exitosamente.")
+# 
+# 
+# vsd <- vst(dds, blind = FALSE)
+# variables_a_graficar <- c("harmonized_cell_type", "harmonized_tissue_type", "harmonized_donor_sex")
+# 
+# pdf(file.path("PCA_Plots", "PCAnuevos.pdf"), width = 11, height = 8.5) # Dimensiones para una página apaisada estándar
+# 
+# 
+# for (variable_actual in variables_a_graficar) {
+# 
+#   message(paste("Generando PCA para la variable:", variable_actual))
+#   pcaData <- plotPCA(vsd, intgroup = variable_actual, returnData = TRUE)
+#   percentVar <- round(100 * attr(pcaData, "percentVar"))
+# 
+#   pca_plot <- ggplot(pcaData, aes(x = PC1, y = PC2, color = .data[[variable_actual]])) +
+#     geom_point(size = 4) +
+#     labs(
+#       title = "Análisis de Componentes Principales (PCA)",
+#       subtitle = paste("Muestras coloreadas por:", gsub("_", " ", variable_actual)), # Subtítulo dinámico y legible
+#       x = paste0("PC1: ", percentVar[1], "% de varianza"),
+#       y = paste0("PC2: ", percentVar[2], "% de varianza"),
+#       color = gsub("_", " ", variable_actual) # Título de la leyenda dinámico
+#     ) +
+#     theme_bw(base_size = 14) + # Aumentar el tamaño base de la fuente
+#     coord_fixed()
+# 
+#   # Imprimir el gráfico. Esto es crucial para que se dibuje en el archivo PDF.
+#   print(pca_plot)
+# 
+# } # Fin del bucle
+# 
+# # 4. Cerrar el dispositivo PDF. Esto guarda el archivo en tu directorio de trabajo.
+# dev.off()
+# 
+# message("Archivo 'PCAsinPC.pdf' creado exitosamente con todos los gráficos.")
 
