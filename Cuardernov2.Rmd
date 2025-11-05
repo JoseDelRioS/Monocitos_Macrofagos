@@ -571,9 +571,10 @@ df_genes <- data.frame(
 
 # Une todo en un solo data frame
 df_final <- rbind(df_bait, df_oe, df_genes)
-
+df_final$chr <- as.factor(df_final$chr)
 # elimina filas duplicadas
 ann_net_nb <- unique(df_final)
+rownames(ann_net_nb)<-NULL
 ```
 
 ------------------------------------------------------------------------
@@ -585,35 +586,35 @@ library(Esearch3D)
 
 
 #1) A two column dataframe representing the gene - fragment interaction network
-gf_net = as.matrix(gf_nb)
+gf_net_mios = as.matrix(gf_nb)
 #2) A two column dataframe representing the fragment-fragment interaction network
-ff_net = as.matrix(nBff)
+ff_net_mios = as.matrix(nBff)
 
 #3) A matrix containing the starting values of the nodes (gene node scores are given by the RNA-seq values while fragments have a starting value of 0)
-input_m = as.matrix(inputnB)
+input_m_mios = as.matrix(inputnB)
 #4) A list of genes to annotate to the chromatin fragments
-ann_net_b= ann_net_nb
+ann_net_b_mios= ann_net_nb
 
 #Two step propagation -----
 #Propagation over the gene-fragment network
-gf_prop = rwr_OVprop(g=gf_net,
-                     input_m = input_m, 
+gf_prop_mios = rwr_OVprop(g=gf_net_mios,
+                     input_m = input_m_mios, 
                      no_cores = 5, 
                      r = 0.8)
 #Propagation over the gene-fragment-fragment network
-ff_prop=rwr_OVprop(g=ff_net,
-                   input_m = gf_prop, 
+ff_prop_mios=rwr_OVprop(g=ff_net_mios,
+                   input_m = gf_prop_mios, 
                    no_cores = 5, 
                    r = 0.8)
 
 #Create an annotated igraph object
-net=create_net2plot(gf_net,
-                    input_m,
-                    gf_prop,
-                    ann_net_b,
+net_mios=create_net2plot(gf_net_mios,
+                    input_m_mios,
+                    gf_prop_mios,
+                    ann_net_b_mios,
                     frag_pattern = "frag",
-                    ff_net,
-                    ff_prop)
+                    ff_net_mios,
+                    ff_prop_mios)
 
 ```
 
@@ -623,7 +624,7 @@ net=create_net2plot(gf_net,
 
 ```{r}
 #Start the GUI
-start_GUI(net, ann_net_b)
+start_GUI(net_mios, ann_net_b_mios)
 ```
 
 ------------------------------------------------------------------------
